@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+*.pyc
+dev-ignore/
+report.md
+eval_bundle/
+
+# Secrets
+.env
+
+# Local setup
+CLAUDE.md
+wandb/
+
+reference/
+knowledge/
+cache
+cache_old
+
+.claude/
+.agents/
+.codex/
+
+.venv/
+.venv
+
+*/__pycache__/

@@ -738,15 +738,19 @@ def get_init_h(model, idx, par, strategy='h0', preheat_cache=None, pw=None):
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_val_data(device, max_tokens=1_000_000):
+def load_val_data(device, max_tokens=1_000_000, seed=42):
     base_dir = os.environ.get('NANOCHAT_BASE_DIR')
+    import random
     import pyarrow.parquet as pq
     from nanochat.tokenizer import get_tokenizer
     tokenizer = get_tokenizer()
     bos = tokenizer.get_bos_token_id()
     table = pq.read_table(os.path.join(base_dir, 'base_data_climbmix', 'shard_06542.parquet'), columns=['text'])
+    texts = table.column('text').to_pylist()
+    rng = random.Random(seed)
+    rng.shuffle(texts)
     all_tokens = []
-    for text in table.column('text').to_pylist():
+    for text in texts:
         all_tokens.extend(tokenizer.encode(text, prepend=bos))
         if len(all_tokens) >= max_tokens: break
     batches = []

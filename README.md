@@ -2,7 +2,7 @@
 
 Code for the paper *Layer-Parallel Inference via Structured Newton Corrections*.
 
-<!-- [Paper](https://arxiv.org/abs/XXXX.XXXXX) -->
+[![arXiv](https://img.shields.io/badge/arXiv-2605.17842-b31b1b.svg)](https://arxiv.org/abs/2605.17842)
 
 ![Overview](dev/snlp.png)
 
@@ -101,6 +101,8 @@ See `runs_snlp/train_*.sh` for all model training scripts.
 
 ## Inference Evaluation
 
+> **Note**: The evaluation code shuffles the validation data with a fixed seed for better domain coverage. This gives slightly different absolute PPL values compared to the paper (which used sequential reading). The relative ΔPPL% is consistent within ~1pp. See [`runs_snlp/README.md`](runs_snlp/README.md) for a detailed comparison.
+
 ```bash
 # Evaluate a specific SNLP config (single-config evaluator)
 CUDA_VISIBLE_DEVICES=0 NANOCHAT_BASE_DIR=cache uv run python -m snlp.eval_snlp \
@@ -146,18 +148,14 @@ HF_HOME=/path/to/hf_cache uv run python -m snlp.demo_snlp_deer_qwen \
 
 ## Citation
 
-Coming soon.
-
-<!--
 ```bibtex
 @article{han2026snlp,
-  title={Layer-Parallel Inference via Structured Newton Corrections},
+  title={SNLP: Layer-Parallel Inference via Structured Newton Corrections},
   author={Han, Ligong and Xu, Kai and Wang, Hao and Srivastava, Akash},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
+  journal={arXiv preprint arXiv:2605.17842},
   year={2026}
 }
 ```
--->
 
 ## Acknowledgement
 

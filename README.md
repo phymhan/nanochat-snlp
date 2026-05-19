@@ -146,6 +146,17 @@ HF_HOME=/path/to/hf_cache uv run python -m snlp.demo_snlp_deer_qwen \
     --jacobian diag --jvp vjp --scan --layer-start 16 --parallel-iters 8
 ```
 
+## Acknowledgement
+
+This codebase builds on several excellent open-source projects:
+
+- [Nanochat](https://github.com/karpathy/nanochat) by Andrej Karpathy — this codebase is largely based on Nanochat, which provides the model architecture, training infrastructure, data pipeline, and tokenizer
+- [ELK](https://github.com/lindermanlab/elk) by Gonzalez et al. — quasi-Newton methods for parallelizing nonlinear recurrences
+- [mHC](https://github.com/tokenbender/mHC-manifold-constrained-hyper-connections) by Xie et al. — manifold-constrained HyperConnections
+- [SJD](https://github.com/tyshiwo1/Accelerating-T2I-AR-with-SJD/) by Teng et al. — Jacobi decoding for accelerating autoregressive models
+
+We thank the authors for generously open-sourcing their work.
+
 ## Citation
 
 ```bibtex
@@ -156,14 +167,3 @@ HF_HOME=/path/to/hf_cache uv run python -m snlp.demo_snlp_deer_qwen \
   year={2026}
 }
 ```
-
-## Acknowledgement
-
-This codebase builds on several excellent open-source projects:
-
-- [Nanochat](https://github.com/karpathy/nanochat) by Andrej Karpathy — base model architecture, training, and data infrastructure
-- [ELK](https://github.com/lindermanlab/elk) by Gonzalez et al. — quasi-Newton methods for parallelizing nonlinear recurrences
-- [mHC](https://github.com/tokenbender/mHC-manifold-constrained-hyper-connections) by Xie et al. — manifold-constrained HyperConnections
-- [SJD](https://github.com/tyshiwo1/Accelerating-T2I-AR-with-SJD/) by Song et al. — Jacobi decoding for accelerating autoregressive models
-
-We thank the authors for generously open-sourcing their work.

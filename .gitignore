@@ -25,3 +25,4 @@ cache_old
 .venv
 
 */__pycache__/
+ln_*

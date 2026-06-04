@@ -1,23 +1,19 @@
 """
 SNLP single-config evaluator: PPL, timing, top-1, cos_sim.
-Supports IDN, ChunkB, HCN-Newton, DiagN methods on basic, nox0ve, and mHC models.
+Supports IDN, ChunkB, HCN-Newton, and DiagN methods on basic, nox0ve, and mHC models.
 
 Usage:
     # IDN batched
-    uv run python -m snlp.eval_snlp --model-tag d32s_idn05_npar24_s3 \
-        --n-par 24 --method IDN_batched --K 2 --init h0
+    uv run python -m snlp.eval_snlp --model-tag d32s_idn00625_npar24_s3 \
+        --n-par 24 --method IDN_batched --K 4 --init h0
 
     # ChunkB (12 chunks of 2 fused layers)
-    uv run python -m snlp.eval_snlp --model-tag d32s_idn05_npar24_s3 \
+    uv run python -m snlp.eval_snlp --model-tag d32s_nox0ve_idn05_npar24_s6_4800 \
         --n-par 24 --method ChunkB --chunks 12 --K 2 --init h0
 
     # mHC-Newton
     uv run python -m snlp.eval_snlp --model-tag d32s_mhc4_x0ve_newton05 \
         --n-par 20 --method mHC-Newton --K 4 --init h0 --cache-hc
-
-    # DiagN (VJP estimator)
-    uv run python -m snlp.eval_snlp --model-tag d32s_idn05_npar24_s3 \
-        --n-par 24 --method DiagN --K 4 --init batch_fwd --jvp-method vjp
 
     # Sequential only (just report seq PPL + timing)
     uv run python -m snlp.eval_snlp --model-tag d32s_baseline_4800 --n-par 12
@@ -93,6 +89,8 @@ def main():
     parser.add_argument("--jvp-method", type=str, default='vjp', choices=['fd', 'vjp'],
                         help="Jacobian estimator for DiagN")
     parser.add_argument("--cache-hc", action="store_true")
+    parser.add_argument("--seq-len", type=int, default=2048,
+                        help="Validation context length for PPL eval.")
     parser.add_argument("--max-tokens", type=int, default=1_000_000)
     parser.add_argument("--top1-batches", type=int, default=100)
     parser.add_argument("--output", type=str, default=None)
@@ -109,8 +107,8 @@ def main():
 
     print(f"Model: {args.model_tag}, L={L}, n_par={n_par}, type={model_type}")
 
-    batches = load_val_data(device, args.max_tokens)
-    print(f"Val: {len(batches) * 128:,} tokens, {len(batches)} batches")
+    batches = load_val_data(device, args.max_tokens, seq_len=args.seq_len)
+    print(f"Val: {len(batches) * args.seq_len:,} tokens, {len(batches)} batches, seq_len={args.seq_len}")
 
     # Precompute weights
     if use_mhc:
@@ -127,6 +125,7 @@ def main():
 
     results = {
         'model': args.model_tag, 'n_par': n_par, 'model_type': model_type,
+        'seq_len': args.seq_len,
         'seq_ppl': seq_ppl, 'seq_ms': seq_ms,
     }
 

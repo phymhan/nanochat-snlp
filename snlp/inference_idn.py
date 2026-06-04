@@ -738,26 +738,23 @@ def get_init_h(model, idx, par, strategy='h0', preheat_cache=None, pw=None):
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_val_data(device, max_tokens=1_000_000, seed=42):
+def load_val_data(device, max_tokens=1_000_000, seq_len=128):
     base_dir = os.environ.get('NANOCHAT_BASE_DIR')
-    import random
     import pyarrow.parquet as pq
     from nanochat.tokenizer import get_tokenizer
     tokenizer = get_tokenizer()
     bos = tokenizer.get_bos_token_id()
     table = pq.read_table(os.path.join(base_dir, 'base_data_climbmix', 'shard_06542.parquet'), columns=['text'])
-    texts = table.column('text').to_pylist()
-    rng = random.Random(seed)
-    rng.shuffle(texts)
     all_tokens = []
-    for text in texts:
+    need_tokens = max_tokens + seq_len + 1
+    for text in table.column('text').to_pylist():
         all_tokens.extend(tokenizer.encode(text, prepend=bos))
-        if len(all_tokens) >= max_tokens: break
+        if len(all_tokens) >= need_tokens: break
     batches = []
     offset = 0
-    while offset + 129 <= len(all_tokens):
-        batches.append(torch.tensor([all_tokens[offset:offset+129]], dtype=torch.long, device=device))
-        offset += 128
+    while offset + seq_len + 1 <= len(all_tokens) and len(batches) * seq_len < max_tokens:
+        batches.append(torch.tensor([all_tokens[offset:offset + seq_len + 1]], dtype=torch.long, device=device))
+        offset += seq_len
     return batches
 
 

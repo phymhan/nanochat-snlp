@@ -804,7 +804,7 @@ def forward_hcn_batched(model, idx, seq_layers, pw, K=1, init='h0'):
 # Data loading + PPL eval
 # ---------------------------------------------------------------------------
 
-def load_val_data(device, max_tokens=1_000_000):
+def load_val_data(device, max_tokens=1_000_000, seq_len=128):
     base_dir = os.environ.get('NANOCHAT_BASE_DIR')
     import pyarrow.parquet as pq
     from nanochat.tokenizer import get_tokenizer
@@ -815,15 +815,16 @@ def load_val_data(device, max_tokens=1_000_000):
         columns=['text']
     )
     all_tokens = []
+    need_tokens = max_tokens + seq_len + 1
     for text in table.column('text').to_pylist():
         all_tokens.extend(tokenizer.encode(text, prepend=bos))
-        if len(all_tokens) >= max_tokens:
+        if len(all_tokens) >= need_tokens:
             break
     batches = []
     offset = 0
-    while offset + 129 <= len(all_tokens):
-        batches.append(torch.tensor([all_tokens[offset:offset + 129]], dtype=torch.long, device=device))
-        offset += 128
+    while offset + seq_len + 1 <= len(all_tokens) and len(batches) * seq_len < max_tokens:
+        batches.append(torch.tensor([all_tokens[offset:offset + seq_len + 1]], dtype=torch.long, device=device))
+        offset += seq_len
     return batches
 
 

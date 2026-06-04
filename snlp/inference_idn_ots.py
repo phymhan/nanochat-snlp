@@ -717,7 +717,7 @@ class GemmaBackend(ModelBackend):
         pw.q_norm = torch.stack([l.self_attn.q_norm.weight for l in layers]).to(dt)
         pw.k_norm = torch.stack([l.self_attn.k_norm.weight for l in layers]).to(dt)
 
-        pw.is_sliding = [l.self_attn.is_sliding for l in layers]
+        pw.is_sliding = [bool(l.self_attn.is_sliding) for l in layers]
 
         pw.par = par
         pw.n_par = len(par)
@@ -749,6 +749,8 @@ class GemmaBackend(ModelBackend):
 
         cw.layers = chunk_layers
         cw.n = n
+        sliding_flags = [bool(l.self_attn.is_sliding) for l in layers]
+        cw.is_sliding_majority = sum(sliding_flags) >= (len(sliding_flags) / 2)
         return cw
 
     # -- prefix --------------------------------------------------------------
@@ -976,6 +978,11 @@ class GemmaBackend(ModelBackend):
         cos_l_r = cos_l.unsqueeze(0).unsqueeze(2)
         sin_l_r = sin_l.unsqueeze(0).unsqueeze(2)
 
+        if chunk_sliding_flags is None:
+            chunk_sliding_flags = [
+                getattr(cw, "is_sliding_majority", False) for cw in chunk_weights_list
+            ]
+        chunk_sliding_flags = [bool(x) for x in chunk_sliding_flags]
         sliding_t = torch.tensor(chunk_sliding_flags, device=all_q.device).view(C, 1, 1, 1, 1)
         cos_stack = torch.where(sliding_t, cos_l_r.expand(C, -1, -1, -1, -1), cos_g_r.expand(C, -1, -1, -1, -1))
         sin_stack = torch.where(sliding_t, sin_l_r.expand(C, -1, -1, -1, -1), sin_g_r.expand(C, -1, -1, -1, -1))

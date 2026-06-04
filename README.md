@@ -8,13 +8,14 @@ Code for the paper *Layer-Parallel Inference via Structured Newton Corrections*.
 
 ## Overview
 
-Autoregressive language models execute Transformer layers sequentially, creating a latency bottleneck not removed by tensor or pipeline parallelism. We introduce **Structured Newton Layer Parallelism (SNLP)**, a training and inference framework that replaces exact layer Jacobians with cheap structured surrogates to enable layer-parallel inference.
+Autoregressive language models execute Transformer layers sequentially, creating a latency bottleneck that is not removed by conventional tensor or pipeline parallelism. SNLP studies whether this layerwise dependency can be relaxed by treating the hidden-state trace across layers as the solution of a nonlinear residual equation and solving it with parallel Newton-style updates.
+
+Exact Newton corrections require expensive Jacobian-vector products, while naive fixed-point iterations are unstable on trained Transformers. **Structured Newton Layer Parallelism (SNLP)** replaces exact layer Jacobians with cheap architecture-induced surrogate dynamics:
 
 - **Identity Newton (IDN)**: For residual Transformers, the correction reduces to additive prefix-style propagation over depth.
 - **HC Newton (HCN)**: For mHC-style architectures, uses the learned residual mixing matrix as the Newton surrogate.
-- **Diagonal Newton (DiagN)**: Uses the diagonal of the layer Jacobian, solved via associative prefix scan.
 
-With SNLP-aware regularization and chunkwise layer fusion, trained-from-scratch Nanochat models reach up to **2.3x speedup** with comparable or lower perplexity. SNLP regularization also improves sequential PPL by **4.7%--23.4%** across model variants.
+SNLP-aware training includes pretraining regularization and direct SNLP-forward SFT. Experiments on Nanochat-scale Transformers show a practical speed-quality frontier: on 0.5B models, selected configurations reach up to **2.58x wall-clock speedup**, and a less aggressive configuration reaches **1.40x speedup** without increasing PPL. The useful tradeoff comes from the biased finite-iteration computation induced by IDN/HCN rather than exact recovery of the sequential trace. SNLP-forward SFT can preserve downstream task accuracy, and SNLP can also serve as a drafter for self-speculative decoding while a sequential verifier preserves output correctness.
 
 ## Project Structure
 
@@ -29,7 +30,6 @@ nanochat-snlp/
 ├── snlp/                        # SNLP inference and evaluation
 │   ├── inference_idn.py         # IDN forward functions (batched, fused, chunkwise)
 │   ├── inference_hcn.py         # HCN forward functions for mHC models
-│   ├── inference_diagn.py       # DiagN forward functions with associative scan
 │   ├── inference_idn_ots.py     # IDN for off-the-shelf HF models (Qwen, TinyLlama, Gemma)
 │   ├── eval_snlp.py             # Evaluation entry point (PPL, timing, top-1, cos_sim)
 │   ├── eval_snlp_ots.py         # Evaluation entry for off-the-shelf models
@@ -48,24 +48,23 @@ nanochat-snlp/
 | `forward_idn_chunkwise` | `inference_idn.py` | Chunkwise fused + inter-chunk IDN correction | IDN CxFM |
 | `forward_hcn_batched` | `inference_hcn.py` | HCN per-layer batched + H^res Newton correction | HCN NxF1 |
 | `forward_hcn_chunkwise` | `inference_hcn.py` | Chunkwise fused + inter-chunk HCN correction | HCN CxFM |
-| `forward_diagn_batched` | `inference_diagn.py` | Diagonal Newton + Hutchinson estimation + prefix scan | DiagN |
 
 **Config notation**: `CxFM-init` = C parallel chunks, each fusing M layers, with initialization `h0` (prefix state) or `batch_fwd` (one-shot forward). K = number of Newton iterations.
 
 ## Training Configurations
 
-| Model | Tag | Key flags |
-|-------|-----|-----------|
-| Nanochat-3B baseline | `d32_baseline` | `--depth=32 --fp8` |
-| Nanochat-3B IDN | `d32_idn01_npar24` | `+ --identity-newton-reg=0.1` |
-| Nanochat-3B DiagN | `d32_diag01_npar24_stride3` | `+ --diag-newton-reg=0.1 --idn-stride=3 --idn-detach-target` |
-| Nanochat-0.5B baseline | `d32s_baseline_4800` | `--depth=32 --aspect-ratio=20` |
-| Nanochat-0.5B IDN | `d32s_idn05_npar24_s3` | `+ --identity-newton-reg=0.5 --idn-stride=3` |
-| Nanochat-0.5B DiagN | `d32s_diag01_npar24_stride3_9600` | `+ --diag-newton-reg=0.1 --idn-stride=3 --idn-detach-target` |
-| Nanochat-0.5B w/o x0ve baseline | `d32s_nox0ve_baseline_9600` | `+ --no-x0-resid --no-ve` |
-| Nanochat-0.5B w/o x0ve IDN | `d32s_nox0ve_idn05_npar24_s6_4800` | `+ --identity-newton-reg=0.5 --idn-stride=6` |
-| Nanochat-0.5B-mHC baseline | `d32s_mhc4_x0ve_baseline` | `+ --use-mhc --mhc-num-streams=4` |
-| Nanochat-0.5B-mHC HCN | `d32s_mhc4_x0ve_newton05` | `+ --mhc-newton-reg=0.5 --idn-detach-target` |
+| Model | PPL | Key flags |
+|-------|----:|-----------|
+| Nanochat-3B baseline | 10.10 | `--depth=32 --fp8` |
+| Nanochat-3B IDN | 10.07 | `+ --identity-newton-reg=0.5 --n-par-configs=8` |
+| Nanochat-0.5B baseline | 15.21 | `--depth=32 --aspect-ratio=20` |
+| Nanochat-0.5B IDN | 15.36 | `+ --identity-newton-reg=0.0625 --idn-stride=3` |
+| Nanochat-0.5B w/o x0ve baseline | 17.65 | `+ --no-x0-resid --no-ve` |
+| Nanochat-0.5B w/o x0ve IDN | 17.57 | `+ --no-x0-resid --no-ve --identity-newton-reg=0.5 --idn-stride=6` |
+| Nanochat-0.5B-mHC baseline | 15.16 | `+ --use-mhc --mhc-num-streams=4` |
+| Nanochat-0.5B-mHC HCN | 15.52 | `+ --use-mhc --mhc-num-streams=4 --mhc-newton-reg=0.5 --idn-detach-target` |
+
+See `runs_snlp/README.md` for the exact reproduction scripts and selected SNLP evaluation configurations.
 
 ## Setup
 
@@ -92,32 +91,25 @@ NANOCHAT_BASE_DIR=cache uv run torchrun --standalone --nproc_per_node=4 \
     -m scripts.base_train -- \
     --depth=32 --aspect-ratio=20 --device-batch-size=8 \
     --num-iterations=4800 \
-    --identity-newton-reg=0.5 --idn-stride=3 --jacobi-reg-warmup=0.2 \
+    --identity-newton-reg=0.0625 --idn-stride=3 --jacobi-reg-warmup=0.2 \
     --n-par-configs=8,16,24 \
-    --model-tag=d32s_idn05_npar24_s3
+    --model-tag=my_d32s_idn
 ```
 
 See `runs_snlp/train_*.sh` for all model training scripts.
 
 ## Inference Evaluation
 
-> **Note**: The evaluation code shuffles the validation data with a fixed seed for better domain coverage. This gives slightly different absolute PPL values compared to the paper (which used sequential reading). The relative ΔPPL% is consistent within ~1pp. See [`runs_snlp/README.md`](runs_snlp/README.md) for a detailed comparison.
-
 ```bash
 # Evaluate a specific SNLP config (single-config evaluator)
 CUDA_VISIBLE_DEVICES=0 NANOCHAT_BASE_DIR=cache uv run python -m snlp.eval_snlp \
-    --model-tag d32s_idn05_npar24_s3 \
-    --n-par 24 --method ChunkB --chunks 12 --K 2 --init h0
+    --model-tag my_d32s_idn \
+    --n-par 24 --method IDN_batched --K 4 --init h0
 
 # Evaluate mHC model with HCN correction
 CUDA_VISIBLE_DEVICES=0 NANOCHAT_BASE_DIR=cache uv run python -m snlp.eval_snlp \
-    --model-tag d32s_mhc4_x0ve_newton05 \
-    --n-par 20 --method mHC-Newton --K 4 --init h0 --cache-hc
-
-# Evaluate with DiagN correction
-CUDA_VISIBLE_DEVICES=0 NANOCHAT_BASE_DIR=cache uv run python -m snlp.eval_snlp \
-    --model-tag d32s_idn05_npar24_s3 \
-    --n-par 24 --method DiagN --K 4 --init batch_fwd --jvp-method vjp
+    --model-tag my_d32s_mhc_hcn \
+    --n-par 16 --method mHC-Newton --K 4 --init h0 --cache-hc
 
 # Reproduce paper configs for a model variant
 bash runs_snlp/eval_idn_d32s_idn.sh
@@ -146,17 +138,6 @@ HF_HOME=/path/to/hf_cache uv run python -m snlp.demo_snlp_deer_qwen \
     --jacobian diag --jvp vjp --scan --layer-start 16 --parallel-iters 8
 ```
 
-## Acknowledgement
-
-This codebase builds on several excellent open-source projects:
-
-- [Nanochat](https://github.com/karpathy/nanochat) by Andrej Karpathy — this codebase is largely based on Nanochat, which provides the model architecture, training infrastructure, data pipeline, and tokenizer
-- [ELK](https://github.com/lindermanlab/elk) by Gonzalez et al. — quasi-Newton methods for parallelizing nonlinear recurrences
-- [mHC](https://github.com/tokenbender/mHC-manifold-constrained-hyper-connections) by Xie et al. — manifold-constrained HyperConnections
-- [SJD](https://github.com/tyshiwo1/Accelerating-T2I-AR-with-SJD/) by Teng et al. — Jacobi decoding for accelerating autoregressive models
-
-We thank the authors for generously open-sourcing their work.
-
 ## Citation
 
 ```bibtex
@@ -167,3 +148,15 @@ We thank the authors for generously open-sourcing their work.
   year={2026}
 }
 ```
+
+
+## Acknowledgement
+
+This codebase builds on several excellent open-source projects:
+
+- [Nanochat](https://github.com/karpathy/nanochat) by Andrej Karpathy — this codebase is largely based on Nanochat, which provides the model architecture, training infrastructure, data pipeline, and tokenizer
+- [ELK](https://github.com/lindermanlab/elk) by Gonzalez et al. — quasi-Newton methods for parallelizing nonlinear recurrences
+- [mHC](https://github.com/tokenbender/mHC-manifold-constrained-hyper-connections) by Xie et al. — manifold-constrained HyperConnections
+- [SJD](https://github.com/tyshiwo1/Accelerating-T2I-AR-with-SJD/) by Teng et al. — Jacobi decoding for accelerating autoregressive models
+
+We thank the authors for generously open-sourcing their work.

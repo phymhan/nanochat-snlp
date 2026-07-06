@@ -1,5 +1,7 @@
 # SNLP: Structured Newton Layer Parallelism
 
+> Code for the FHE extension is available on the [`snlp-fhe`](https://github.com/phymhan/nanochat-snlp/tree/snlp-fhe) branch.
+
 Code for the paper *Layer-Parallel Inference via Structured Newton Corrections*.
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.17842-b31b1b.svg)](https://arxiv.org/abs/2605.17842)

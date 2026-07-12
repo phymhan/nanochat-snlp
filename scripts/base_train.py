@@ -96,6 +96,9 @@ parser.add_argument("--mhc-num-streams", type=int, default=4, help="number of mH
 parser.add_argument("--mhc-sinkhorn-iters", type=int, default=10, help="Sinkhorn iterations for H_res projection to doubly stochastic")
 parser.add_argument("--mhc-sinkhorn-tau", type=float, default=0.05, help="Sinkhorn temperature")
 parser.add_argument("--mhc-newton-reg", type=float, default=0.0, help="mHC-Newton regularization weight: trains branch to be small so J ≈ H^res (0 = disabled)")
+# Multi-Token Prediction
+parser.add_argument("--num-mtp-steps", type=int, default=0, help="MTP auxiliary heads predicting k tokens ahead during training (0=disabled)")
+parser.add_argument("--mtp-loss-weight", type=float, default=0.3, help="weight per MTP auxiliary loss term (DeepSeek-V3 default: 0.3)")
 # Output
 parser.add_argument("--model-tag", type=str, default=None, help="override model tag for checkpoint directory name")
 args = parser.parse_args()
@@ -164,6 +167,7 @@ def build_model_meta(depth):
         no_x0_resid=args.no_x0_resid, no_ve=args.no_ve,
         use_mhc=args.use_mhc, mhc_num_streams=args.mhc_num_streams,
         mhc_sinkhorn_iters=args.mhc_sinkhorn_iters, mhc_sinkhorn_tau=args.mhc_sinkhorn_tau,
+        num_mtp_steps=args.num_mtp_steps, mtp_loss_weight=args.mtp_loss_weight,
     )
     with torch.device("meta"):
         model_meta = GPT(config)

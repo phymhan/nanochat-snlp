@@ -31,6 +31,10 @@ def _patch_missing_config_keys(model_config_kwargs):
                           ("mhc_sinkhorn_iters", 10), ("mhc_sinkhorn_tau", 0.05)]:
         if key not in model_config_kwargs:
             model_config_kwargs[key] = default
+    # MTP defaults (disabled)
+    for key, default in [("num_mtp_steps", 0), ("mtp_loss_weight", 0.3)]:
+        if key not in model_config_kwargs:
+            model_config_kwargs[key] = default
 
 def _patch_missing_keys(model_data, model_config):
     """Add default values for new parameters that may be missing in old checkpoints."""
@@ -60,6 +64,13 @@ def _patch_missing_keys(model_data, model_config):
         model_data["backout_lambda"] = torch.zeros(1)
         log0(f"Patching missing backout_lambda in model data to 0.0")
     # value_embeds and ve_gate for layers that should have them
+    # MTP projection weights (zero init for missing keys in old checkpoints)
+    if getattr(model_config, 'num_mtp_steps', 0) > 0:
+        for k in range(model_config.num_mtp_steps):
+            key = f"mtp_projs.{k}.weight"
+            if key not in model_data:
+                model_data[key] = torch.zeros(model_config.n_embd, model_config.n_embd)
+                log0(f"Patching missing {key} in model data to zeros")
     from nanochat.gpt import has_ve
     if not getattr(model_config, 'no_ve', False):
         for i in range(n_layer):

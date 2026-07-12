@@ -44,6 +44,9 @@ class GPTConfig:
     mhc_num_streams: int = 4        # number of residual streams
     mhc_sinkhorn_iters: int = 10    # Sinkhorn iterations for doubly stochastic projection
     mhc_sinkhorn_tau: float = 0.05  # Sinkhorn temperature
+    # Multi-Token Prediction (DeepSeek-V3 / LLaMA 3.1 style)
+    num_mtp_steps: int = 0          # 0=disabled; k>0 adds k auxiliary heads predicting tokens 2..k+1 ahead
+    mtp_loss_weight: float = 0.3    # weight per aux head loss term
 
 
 def norm(x):
@@ -271,6 +274,12 @@ class GPT(nn.Module):
         head_dim = config.n_embd // config.n_head
         kv_dim = config.n_kv_head * head_dim
         self.value_embeds = nn.ModuleDict({str(i): nn.Embedding(padded_vocab_size, kv_dim) for i in range(config.n_layer) if has_ve(i, config.n_layer)})
+        # MTP auxiliary projection heads (one n_embd→n_embd Linear per step, shared lm_head)
+        if config.num_mtp_steps > 0:
+            self.mtp_projs = nn.ModuleList([
+                Linear(config.n_embd, config.n_embd, bias=False)
+                for _ in range(config.num_mtp_steps)
+            ])
         # To support meta device initialization, we init the rotary embeddings here, but it's just "fake" meta tensors only.
         # As for rotary_seq_len, these rotary embeddings are pretty small/cheap in memory,
         # so let's just over-compute them by 10X, but assert fail if we ever reach that amount.
@@ -332,6 +341,11 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             if block.attn.ve_gate is not None:
                 torch.nn.init.uniform_(block.attn.ve_gate.weight, 0.0, 0.02)
+
+        # MTP projection heads: same uniform init as attention weights
+        if hasattr(self, 'mtp_projs'):
+            for proj in self.mtp_projs:
+                torch.nn.init.uniform_(proj.weight, -s, s)
 
         # mHC HyperConnection parameters
         # Init values chosen so H_res ≈ identity and H_pre ≈ one-hot after Sinkhorn/softmax
@@ -459,6 +473,8 @@ class GPT(nn.Module):
         value_embeds = sum(p.numel() for p in self.value_embeds.parameters())
         lm_head = sum(p.numel() for p in self.lm_head.parameters())
         transformer_matrices = sum(p.numel() for p in self.transformer.h.parameters())
+        mtp_numel = sum(p.numel() for p in self.mtp_projs.parameters()) if hasattr(self, 'mtp_projs') else 0
+        transformer_matrices += mtp_numel
         scalars = self.resid_lambdas.numel() + self.x0_lambdas.numel() + self.smear_gate.weight.numel() + self.smear_lambda.numel() + self.backout_lambda.numel()
         total = wte + value_embeds + lm_head + transformer_matrices + scalars
         assert total == sum(p.numel() for p in self.parameters()), "Parameter count mismatch"
@@ -488,6 +504,8 @@ class GPT(nn.Module):
             matrix_params = [p for p in self.transformer.h.parameters() if id(p) not in mhc_param_ids]
         else:
             matrix_params = list(self.transformer.h.parameters())
+        if hasattr(self, 'mtp_projs'):
+            matrix_params += list(self.mtp_projs.parameters())
         value_embeds_params = list(self.value_embeds.parameters())
         embedding_params = list(self.transformer.wte.parameters())
         lm_head_params = list(self.lm_head.parameters())
@@ -801,6 +819,7 @@ class GPT(nn.Module):
         # Subtract mid-layer residual to remove low-level features before logit projection
         if x_backout is not None:
             x = x - self.backout_lambda.to(x.dtype) * x_backout
+        x_hidden = x  # pre-norm hidden states for MTP auxiliary heads
         x = norm(x)
 
         # Forward the lm_head (compute logits)
@@ -826,6 +845,22 @@ class GPT(nn.Module):
                 loss = loss + warmup * diag_newton_reg * diag_newton_loss
             if mhc_newton_reg > 0:
                 loss = loss + warmup * mhc_newton_reg * mhc_newton_loss
+            # MTP auxiliary heads: predict tokens 2..k+1 ahead using pre-norm hidden states.
+            # Gated on loss_reduction=='mean' so val bpb evaluation ('none') is unaffected.
+            if hasattr(self, 'mtp_projs') and loss_reduction == 'mean':
+                for k, proj in enumerate(self.mtp_projs):
+                    shift = k + 1
+                    mtp_h = norm(proj(x_hidden[:, :-shift, :]))           # (B, T-shift, n_embd)
+                    mtp_logits = self.lm_head(mtp_h)[..., :self.config.vocab_size]
+                    mtp_logits = softcap * torch.tanh(mtp_logits.float() / softcap)
+                    mtp_targets = targets[:, shift:]                        # (B, T-shift)
+                    mtp_loss_k = F.cross_entropy(
+                        mtp_logits.reshape(-1, mtp_logits.size(-1)),
+                        mtp_targets.reshape(-1),
+                        ignore_index=-1,
+                        reduction='mean',
+                    )
+                    loss = loss + self.config.mtp_loss_weight * mtp_loss_k
             return loss
         else:
             # inference: just return the logits directly
